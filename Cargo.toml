@@ -1,7 +1,12 @@
 [package]
 name = "ethaddrgen"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Jakub Hlusička <limeth@protonmail.com>"]
+description = "Custom Ethereum address generator"
+keywords = ["ethereum", "cryptocurrency", "cracking", "hashing", "bruteforce"]
+readme = "README.md"
+license = "GPL-3.0"
+repository = "https://github.com/Limeth/ethaddrgen/"
 
 [dependencies]
 itertools = "0.6.0"
@@ -11,3 +16,5 @@ secp256k1 = "0.6.2"
 tiny-keccak = "1.2.1"
 num_cpus = "1.5.0"
 termcolor = "0.3.2"
+clap = "2.24.2"
+lazy_static = "0.2.8"
