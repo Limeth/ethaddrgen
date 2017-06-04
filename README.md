@@ -1,4 +1,6 @@
 # ethaddrgen
+[![Build Status](https://travis-ci.org/Limeth/ethaddrgen.svg?branch=master)](https://travis-ci.org/Limeth/ethaddrgen)
+[![Build status](https://ci.appveyor.com/api/projects/status/tbnkiqgiqkrmtbcc?svg=true)](https://ci.appveyor.com/project/Limeth/ethaddrgen)
 #### Custom Ethereum address generator
 Get a shiny ethereum address and stand out from the crowd!
 
