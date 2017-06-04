@@ -35,9 +35,9 @@ lazy_static! {
 }
 
 macro_rules! cprintln {
-    ($surpress:expr, $stdout:expr, $fg:expr, $bg:expr, $($rest:tt)+) => {
+    ($surpress:expr, $stdout:expr, $fg:expr, $($rest:tt)+) => {
         if !$surpress {
-            $stdout.set_color(ColorSpec::new().set_fg($fg).set_bg($bg))
+            $stdout.set_color(ColorSpec::new().set_fg(Some($fg)))
                 .expect("Could not set the text formatting.");
             writeln!($stdout, $($rest)+).expect("Could not output text.");
         }
@@ -45,9 +45,9 @@ macro_rules! cprintln {
 }
 
 macro_rules! cprint {
-    ($surpress:expr, $stdout:expr, $fg:expr, $bg:expr, $($rest:tt)+) => {
+    ($surpress:expr, $stdout:expr, $fg:expr, $($rest:tt)+) => {
         if !$surpress {
-            $stdout.set_color(ColorSpec::new().set_fg($fg).set_bg($bg))
+            $stdout.set_color(ColorSpec::new().set_fg(Some($fg)))
                 .expect("Could not set the text formatting.");
             write!($stdout, $($rest)+).expect("Could not output text.");
         }
@@ -167,14 +167,12 @@ fn get_patterns(stdout: &mut StandardStream,
             Err(error) => {
                 cprint!(matches.is_present("quiet"),
                         stdout,
-                        Some(Color::Yellow),
-                        None,
+                        Color::Yellow,
                         "Skipping pattern '{}': ",
                         &raw_pattern);
                 cprintln!(matches.is_present("quiet"),
                           stdout,
-                          None,
-                          None,
+                          Color::White,
                           "{}",
                           error);
             }
@@ -239,39 +237,34 @@ patterns as regex patterns, which replaces the basic string comparison.")
     if patterns.is_empty() {
         cprintln!(false,
                   stdout,
-                  Some(Color::Red),
-                  None,
+                  Color::Red,
                   "Please, provide at least one valid pattern.");
         std::process::exit(1);
     }
 
     cprintln!(quiet,
               stdout,
-              None,
-              None,
+              Color::White,
               "---------------------------------------------------------------------------------------");
     cprint!(quiet,
             stdout,
-            None,
-            None,
+            Color::White,
             "Looking for an address matching ");
     cprint!(quiet,
             stdout,
-            Some(Color::Blue),
-            None,
+            Color::Blue,
             "{}",
             patterns.len());
-    cprint!(quiet, stdout, None, None, " pattern");
+    cprint!(quiet, stdout, Color::White, " pattern");
 
     if patterns.len() > 1 {
-        cprint!(quiet, stdout, None, None, "s");
+        cprint!(quiet, stdout, Color::White, "s");
     }
 
-    cprintln!(quiet, stdout, None, None, "");
+    cprintln!(quiet, stdout, Color::White, "");
     cprintln!(quiet,
               stdout,
-              None,
-              None,
+              Color::White,
               "---------------------------------------------------------------------------------------");
 
     let thread_count = num_cpus::get();
@@ -358,11 +351,10 @@ patterns as regex patterns, which replaces the basic string comparison.")
                                   iterations_this_second.lock().unwrap();
                               cprint!(quiet,
                                       buffer,
-                                      Some(Color::Blue),
-                                      None,
+                                      Color::Blue,
                                       "{}",
                                       *iterations_per_second);
-                              cprintln!(quiet, buffer, None, None, " addresses / second");
+                              cprintln!(quiet, buffer, Color::White, " addresses / second");
                               *sync_buffer.lock().unwrap() = Some(buffer);
                               *iterations_per_second = 0;
                           });
@@ -392,37 +384,31 @@ patterns as regex patterns, which replaces the basic string comparison.")
 
         cprintln!(quiet,
                   stdout,
-                  None,
-                  None,
+                  Color::White,
                   "---------------------------------------------------------------------------------------");
-        cprint!(quiet, stdout, None, None, "Found address: ");
+        cprint!(quiet, stdout, Color::White, "Found address: ");
         cprintln!(quiet,
                   stdout,
-                  Some(Color::Yellow),
-                  None,
+                  Color::Yellow,
                   "0x{}",
                   result.address);
-        cprint!(quiet, stdout, None, None, "Generated private key: ");
+        cprint!(quiet, stdout, Color::White, "Generated private key: ");
         cprintln!(quiet,
                   stdout,
-                  Some(Color::Red),
-                  None,
+                  Color::Red,
                   "{}",
                   result.private_key);
         cprintln!(quiet,
                   stdout,
-                  None,
-                  None,
+                  Color::White,
                   "Import this private key into an ethereum wallet in order to use the address.");
         cprintln!(quiet,
                   stdout,
-                  Some(Color::Green),
-                  None,
+                  Color::Green,
                   "Buy me a cup of coffee; my ethereum address: 0xc0ffee3bd37d408910ecab316a07269fc49a20ee");
         cprintln!(quiet,
                   stdout,
-                  None,
-                  None,
+                  Color::White,
                   "---------------------------------------------------------------------------------------");
 
         if quiet {
