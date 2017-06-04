@@ -5,12 +5,14 @@
 Get a shiny ethereum address and stand out from the crowd!
 
 [![asciicast](https://asciinema.org/a/cmidn81zwi1c2n49ij4co9pg9.png)](https://asciinema.org/a/cmidn81zwi1c2n49ij4co9pg9)
+Disclaimer: Do not use the private key shown in this demo; it's public, strangers could steal your Eth. Never share your private key with anyone. It's your and only your responsibility to keep your private key in secret.
 
 ## Features
 - Regex support (`--regex`/`-e`): Use regex pattern matching
 - Quiet mode (`--quiet`/`-q`): Output only the results
 - Stream mode (`--stream`/`-s`): Keep outputting results
 - Color settings (`--color`/`-c`): Enable/Disable colors
+- Dictionary support: If no patterns are provided as arguments, patterns are read from the standard input
 
 ## Usage
 Download the latest release [here](https://github.com/Limeth/ethaddrgen/releases).
