@@ -22,7 +22,7 @@ use std::thread;
 use std::sync::Arc;
 use std::time::Duration;
 use std::fmt::Display;
-use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
+use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor, Buffer, BufferWriter};
 use std::ops::Deref;
 
 const ADDRESS_LENGTH: usize = 40;
@@ -37,9 +37,9 @@ lazy_static! {
 macro_rules! cprintln {
     ($surpress:expr, $stdout:expr, $fg:expr, $bg:expr, $($rest:tt)+) => {
         if !$surpress {
-            $stdout.lock().unwrap().set_color(ColorSpec::new().set_fg($fg).set_bg($bg))
+            $stdout.set_color(ColorSpec::new().set_fg($fg).set_bg($bg))
                 .expect("Could not set the text formatting.");
-            writeln!(&mut *$stdout.lock().unwrap(), $($rest)+).expect("Could not output text.");
+            writeln!($stdout, $($rest)+).expect("Could not output text.");
         }
     }
 }
@@ -47,9 +47,9 @@ macro_rules! cprintln {
 macro_rules! cprint {
     ($surpress:expr, $stdout:expr, $fg:expr, $bg:expr, $($rest:tt)+) => {
         if !$surpress {
-            $stdout.lock().unwrap().set_color(ColorSpec::new().set_fg($fg).set_bg($bg))
+            $stdout.set_color(ColorSpec::new().set_fg($fg).set_bg($bg))
                 .expect("Could not set the text formatting.");
-            write!(&mut *$stdout.lock().unwrap(), $($rest)+).expect("Could not output text.");
+            write!($stdout, $($rest)+).expect("Could not output text.");
         }
     }
 }
@@ -147,7 +147,7 @@ fn read_patterns(matches: &ArgMatches) -> Vec<String> {
     }
 }
 
-fn get_patterns(stdout: Arc<Mutex<StandardStream>>,
+fn get_patterns(stdout: &mut StandardStream,
                 matches: &ArgMatches) -> Vec<Box<Pattern>> {
     let mut result: Vec<Box<Pattern>> = Vec::new();
     let raw_patterns = read_patterns(matches);
@@ -233,8 +233,8 @@ patterns as regex patterns, which replaces the basic string comparison.")
 
     let quiet = matches.is_present("quiet");
     let color_choice = parse_color_choice(matches.value_of("color").unwrap()).unwrap();
-    let stdout = Arc::new(Mutex::new(StandardStream::stdout(color_choice)));
-    let patterns = Arc::new(get_patterns(stdout.clone(), &matches));
+    let mut stdout = StandardStream::stdout(color_choice);
+    let patterns = Arc::new(get_patterns(&mut stdout, &matches));
 
     if patterns.is_empty() {
         cprintln!(false,
@@ -281,8 +281,10 @@ patterns as regex patterns, which replaces the basic string comparison.")
         let result: Arc<Mutex<Option<BruteforceResult>>> = Arc::new(Mutex::new(None));
         let iterations_this_second: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
         let alg = Arc::new(Secp256k1::new());
+        let working_threads = Arc::new(Mutex::new(thread_count));
 
         for _ in 0..thread_count {
+            let working_threads = working_threads.clone();
             let patterns = patterns.clone();
             let result = result.clone();
             let alg = alg.clone();
@@ -319,11 +321,25 @@ patterns as regex patterns, which replaces the basic string comparison.")
 
                     *iterations_this_second.lock().unwrap() += 1;
                 }
+
+                *working_threads.lock().unwrap() -= 1;
             }));
         }
 
+        // Note:
+        // Buffers are intended for correct concurrency.
+        // The rest of the project uses StandardStream, which should only be used
+        // from a single thread. This project currently always prints from a single
+        // thread, but we cannot use a shared StandardStream, because there's currently
+        // a bug, where you cannot create an Arc<Mutex<StandardStream>> as it isn't
+        // Sync on Windows platforms. By using a BufferWriter here, we can get around
+        // the issue.
+        let buffer_writer = Arc::new(Mutex::new(BufferWriter::stdout(color_choice)));
+        let sync_buffer: Arc<Mutex<Option<Buffer>>> = Arc::new(Mutex::new(None));
+
         {
-            let stdout = stdout.clone();
+            let buffer_writer = buffer_writer.clone();
+            let sync_buffer = sync_buffer.clone();
             let result = result.clone();
 
             thread::spawn(move || 'dance: loop {
@@ -337,17 +353,34 @@ patterns as regex patterns, which replaces the basic string comparison.")
                                   }
                               }
 
+                              let mut buffer = buffer_writer.lock().unwrap().buffer();
                               let mut iterations_per_second =
                                   iterations_this_second.lock().unwrap();
                               cprint!(quiet,
-                                      stdout,
+                                      buffer,
                                       Some(Color::Blue),
                                       None,
                                       "{}",
                                       *iterations_per_second);
-                              cprintln!(quiet, stdout, None, None, " addresses / second");
+                              cprintln!(quiet, buffer, None, None, " addresses / second");
+                              *sync_buffer.lock().unwrap() = Some(buffer);
                               *iterations_per_second = 0;
                           });
+        }
+
+        'dance:
+        loop {
+            if *working_threads.lock().unwrap() <= 0 {
+                break 'dance;
+            }
+
+            if let Some(ref buffer) = *sync_buffer.lock().unwrap() {
+                buffer_writer.lock().unwrap().print(buffer).unwrap();
+            }
+
+            *sync_buffer.lock().unwrap() = None;
+
+            thread::sleep(Duration::from_millis(10));
         }
 
         for thread in threads {
