@@ -1,6 +1,6 @@
 [package]
 name = "ethaddrgen"
-version = "0.2.0"
+version = "1.0.1"
 authors = ["Jakub Hlusička <limeth@protonmail.com>"]
 description = "Custom Ethereum address generator"
 keywords = ["ethereum", "cryptocurrency", "cracking", "hashing", "bruteforce"]
