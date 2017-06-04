@@ -129,6 +129,7 @@ fn parse_pattern<T: AsRef<str>>(string: T,
     }
 }
 
+// TODO: Remove duplicates, more efficient lookup for string comparison
 fn read_patterns(matches: &ArgMatches) -> Vec<String> {
     if let Some(args) = matches.values_of("PATTERN") {
         args.map(str::to_string).collect()
@@ -252,19 +253,29 @@ patterns as regex patterns, which replaces the basic string comparison.")
                   stdout,
                   Color::White,
                   "---------------------------------------------------------------------------------------");
-        cprint!(quiet,
-                stdout,
-                Color::White,
-                "Looking for an address matching ");
+
+        if patterns.len() <= 1 {
+            cprint!(quiet,
+                    stdout,
+                    Color::White,
+                    "Looking for an address matching ");
+        } else {
+            cprint!(quiet,
+                    stdout,
+                    Color::White,
+                    "Looking for an address matching any of ");
+        }
+
         cprint!(quiet,
                 stdout,
                 Color::Blue,
                 "{}",
                 patterns.len());
-        cprint!(quiet, stdout, Color::White, " pattern");
 
-        if patterns.len() > 1 {
-            cprint!(quiet, stdout, Color::White, "s");
+        if patterns.len() <= 1 {
+            cprint!(quiet, stdout, Color::White, " pattern");
+        } else {
+            cprint!(quiet, stdout, Color::White, " patterns");
         }
 
         cprintln!(quiet, stdout, Color::White, "");
