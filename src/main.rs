@@ -22,7 +22,7 @@ use std::thread;
 use std::sync::Arc;
 use std::time::Duration;
 use std::fmt::Display;
-use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor, Buffer, BufferWriter};
+use termcolor::{Color, ColorChoice, ColorSpec, WriteColor, Buffer, BufferWriter};
 use std::ops::Deref;
 
 const ADDRESS_LENGTH: usize = 40;
@@ -147,7 +147,7 @@ fn read_patterns(matches: &ArgMatches) -> Vec<String> {
     }
 }
 
-fn get_patterns(stdout: &mut StandardStream,
+fn get_patterns(buffer_writer: Arc<Mutex<BufferWriter>>,
                 matches: &ArgMatches) -> Vec<Box<Pattern>> {
     let mut result: Vec<Box<Pattern>> = Vec::new();
     let raw_patterns = read_patterns(matches);
@@ -165,6 +165,7 @@ fn get_patterns(stdout: &mut StandardStream,
         match parse_pattern(&raw_pattern, pattern_type) {
             Ok(pattern) => result.push(pattern),
             Err(error) => {
+                let mut stdout = buffer_writer.lock().unwrap().buffer();
                 cprint!(matches.is_present("quiet"),
                         stdout,
                         Color::Yellow,
@@ -175,6 +176,7 @@ fn get_patterns(stdout: &mut StandardStream,
                           Color::White,
                           "{}",
                           error);
+                buffer_writer.lock().unwrap().print(&stdout).expect("Could not write to stdout.");
             }
         }
     }
@@ -231,41 +233,47 @@ patterns as regex patterns, which replaces the basic string comparison.")
 
     let quiet = matches.is_present("quiet");
     let color_choice = parse_color_choice(matches.value_of("color").unwrap()).unwrap();
-    let mut stdout = StandardStream::stdout(color_choice);
-    let patterns = Arc::new(get_patterns(&mut stdout, &matches));
+    let buffer_writer = Arc::new(Mutex::new(BufferWriter::stdout(color_choice)));
+    let patterns = Arc::new(get_patterns(buffer_writer.clone(), &matches));
 
     if patterns.is_empty() {
+        let mut stdout = buffer_writer.lock().unwrap().buffer();
         cprintln!(false,
                   stdout,
                   Color::Red,
                   "Please, provide at least one valid pattern.");
+        buffer_writer.lock().unwrap().print(&stdout).expect("Could not write to stdout.");
         std::process::exit(1);
     }
 
-    cprintln!(quiet,
-              stdout,
-              Color::White,
-              "---------------------------------------------------------------------------------------");
-    cprint!(quiet,
-            stdout,
-            Color::White,
-            "Looking for an address matching ");
-    cprint!(quiet,
-            stdout,
-            Color::Blue,
-            "{}",
-            patterns.len());
-    cprint!(quiet, stdout, Color::White, " pattern");
+    {
+        let mut stdout = buffer_writer.lock().unwrap().buffer();
+        cprintln!(quiet,
+                  stdout,
+                  Color::White,
+                  "---------------------------------------------------------------------------------------");
+        cprint!(quiet,
+                stdout,
+                Color::White,
+                "Looking for an address matching ");
+        cprint!(quiet,
+                stdout,
+                Color::Blue,
+                "{}",
+                patterns.len());
+        cprint!(quiet, stdout, Color::White, " pattern");
 
-    if patterns.len() > 1 {
-        cprint!(quiet, stdout, Color::White, "s");
+        if patterns.len() > 1 {
+            cprint!(quiet, stdout, Color::White, "s");
+        }
+
+        cprintln!(quiet, stdout, Color::White, "");
+        cprintln!(quiet,
+                  stdout,
+                  Color::White,
+                  "---------------------------------------------------------------------------------------");
+        buffer_writer.lock().unwrap().print(&stdout).expect("Could not write to stdout.");
     }
-
-    cprintln!(quiet, stdout, Color::White, "");
-    cprintln!(quiet,
-              stdout,
-              Color::White,
-              "---------------------------------------------------------------------------------------");
 
     let thread_count = num_cpus::get();
 
@@ -321,13 +329,6 @@ patterns as regex patterns, which replaces the basic string comparison.")
 
         // Note:
         // Buffers are intended for correct concurrency.
-        // The rest of the project uses StandardStream, which should only be used
-        // from a single thread. This project currently always prints from a single
-        // thread, but we cannot use a shared StandardStream, because there's currently
-        // a bug, where you cannot create an Arc<Mutex<StandardStream>> as it isn't
-        // Sync on Windows platforms. By using a BufferWriter here, we can get around
-        // the issue.
-        let buffer_writer = Arc::new(Mutex::new(BufferWriter::stdout(color_choice)));
         let sync_buffer: Arc<Mutex<Option<Buffer>>> = Arc::new(Mutex::new(None));
 
         {
@@ -367,7 +368,7 @@ patterns as regex patterns, which replaces the basic string comparison.")
             }
 
             if let Some(ref buffer) = *sync_buffer.lock().unwrap() {
-                buffer_writer.lock().unwrap().print(buffer).unwrap();
+                buffer_writer.lock().unwrap().print(buffer).expect("Could not write to stdout.");
             }
 
             *sync_buffer.lock().unwrap() = None;
@@ -382,34 +383,38 @@ patterns as regex patterns, which replaces the basic string comparison.")
         let result = result.lock().unwrap();
         let result = result.as_ref().unwrap();
 
-        cprintln!(quiet,
-                  stdout,
-                  Color::White,
-                  "---------------------------------------------------------------------------------------");
-        cprint!(quiet, stdout, Color::White, "Found address: ");
-        cprintln!(quiet,
-                  stdout,
-                  Color::Yellow,
-                  "0x{}",
-                  result.address);
-        cprint!(quiet, stdout, Color::White, "Generated private key: ");
-        cprintln!(quiet,
-                  stdout,
-                  Color::Red,
-                  "{}",
-                  result.private_key);
-        cprintln!(quiet,
-                  stdout,
-                  Color::White,
-                  "Import this private key into an ethereum wallet in order to use the address.");
-        cprintln!(quiet,
-                  stdout,
-                  Color::Green,
-                  "Buy me a cup of coffee; my ethereum address: 0xc0ffee3bd37d408910ecab316a07269fc49a20ee");
-        cprintln!(quiet,
-                  stdout,
-                  Color::White,
-                  "---------------------------------------------------------------------------------------");
+        {
+            let mut stdout = buffer_writer.lock().unwrap().buffer();
+            cprintln!(quiet,
+                      stdout,
+                      Color::White,
+                      "---------------------------------------------------------------------------------------");
+            cprint!(quiet, stdout, Color::White, "Found address: ");
+            cprintln!(quiet,
+                      stdout,
+                      Color::Yellow,
+                      "0x{}",
+                      result.address);
+            cprint!(quiet, stdout, Color::White, "Generated private key: ");
+            cprintln!(quiet,
+                      stdout,
+                      Color::Red,
+                      "{}",
+                      result.private_key);
+            cprintln!(quiet,
+                      stdout,
+                      Color::White,
+                      "Import this private key into an ethereum wallet in order to use the address.");
+            cprintln!(quiet,
+                      stdout,
+                      Color::Green,
+                      "Buy me a cup of coffee; my ethereum address: 0xc0ffee3bd37d408910ecab316a07269fc49a20ee");
+            cprintln!(quiet,
+                      stdout,
+                      Color::White,
+                      "---------------------------------------------------------------------------------------");
+            buffer_writer.lock().unwrap().print(&stdout).expect("Could not write to stdout.");
+        }
 
         if quiet {
             println!("0x{} {}", result.address, result.private_key);
