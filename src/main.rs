@@ -268,7 +268,7 @@ patterns as regex patterns, which replaces the basic string comparison.")
 
         cprint!(quiet,
                 stdout,
-                Color::Blue,
+                Color::Cyan,
                 "{}",
                 patterns.len());
 
@@ -363,7 +363,7 @@ patterns as regex patterns, which replaces the basic string comparison.")
                                   iterations_this_second.lock().unwrap();
                               cprint!(quiet,
                                       buffer,
-                                      Color::Blue,
+                                      Color::Cyan,
                                       "{}",
                                       *iterations_per_second);
                               cprintln!(quiet, buffer, Color::White, " addresses / second");
