@@ -85,12 +85,12 @@ impl Pattern for String {
 
 fn parse_color_choice(string: &str) -> Result<ColorChoice, ()> {
     Ok(match string {
-        "always" => ColorChoice::Always,
-        "always_ansi" => ColorChoice::AlwaysAnsi,
-        "auto" => ColorChoice::Auto,
-        "never" => ColorChoice::Never,
-        _ => return Err(())
-    })
+           "always" => ColorChoice::Always,
+           "always_ansi" => ColorChoice::AlwaysAnsi,
+           "auto" => ColorChoice::Auto,
+           "never" => ColorChoice::Never,
+           _ => return Err(()),
+       })
 }
 
 fn to_hex_string(slice: &[u8], expected_string_size: usize) -> String {
@@ -103,7 +103,9 @@ fn to_hex_string(slice: &[u8], expected_string_size: usize) -> String {
     result
 }
 
-fn parse_pattern<T: AsRef<str>>(string: T, pattern_type: PatternType) -> Result<Box<Pattern>, String> {
+fn parse_pattern<T: AsRef<str>>(string: T,
+                                pattern_type: PatternType)
+                                -> Result<Box<Pattern>, String> {
     match pattern_type {
         PatternType::String => {
             let string = string.as_ref().to_lowercase();
@@ -116,14 +118,14 @@ fn parse_pattern<T: AsRef<str>>(string: T, pattern_type: PatternType) -> Result<
         }
         PatternType::Regex => {
             match RegexBuilder::new(string.as_ref())
-                    .case_insensitive(true)
-                    .multi_line(false)
-                    .dot_matches_new_line(false)
-                    .ignore_whitespace(true)
-                    .unicode(true)
-                    .build() {
+                      .case_insensitive(true)
+                      .multi_line(false)
+                      .dot_matches_new_line(false)
+                      .ignore_whitespace(true)
+                      .unicode(true)
+                      .build() {
                 Ok(result) => return Ok(Box::new(result)),
-                Err(error) => return Err(format!("Invalid regex: {}", error))
+                Err(error) => return Err(format!("Invalid regex: {}", error)),
             }
         }
     }
@@ -139,7 +141,7 @@ fn read_patterns(matches: &ArgMatches) -> Vec<String> {
         for line in stdin.lock().lines() {
             match line {
                 Ok(line) => result.push(line),
-                Err(error) => panic!("{}", error)
+                Err(error) => panic!("{}", error),
             }
         }
 
@@ -164,8 +166,18 @@ fn get_patterns(color_choice: ColorChoice, matches: &ArgMatches) -> Vec<Box<Patt
         match parse_pattern(&raw_pattern, pattern_type) {
             Ok(pattern) => result.push(pattern),
             Err(error) => {
-                cprint!(matches.is_present("quiet"), color_choice, Some(Color::Yellow), None, "Skipping pattern '{}': ", &raw_pattern);
-                cprintln!(matches.is_present("quiet"), color_choice, None, None, "{}", error);
+                cprint!(matches.is_present("quiet"),
+                        color_choice,
+                        Some(Color::Yellow),
+                        None,
+                        "Skipping pattern '{}': ",
+                        &raw_pattern);
+                cprintln!(matches.is_present("quiet"),
+                          color_choice,
+                          None,
+                          None,
+                          "{}",
+                          error);
             }
         }
     }
@@ -225,13 +237,30 @@ patterns as regex patterns, which replaces the basic string comparison.")
     let patterns = Arc::new(get_patterns(color_choice, &matches));
 
     if patterns.is_empty() {
-        cprintln!(false, color_choice, Some(Color::Red), None, "Please, provide at least one valid pattern.");
+        cprintln!(false,
+                  color_choice,
+                  Some(Color::Red),
+                  None,
+                  "Please, provide at least one valid pattern.");
         std::process::exit(1);
     }
 
-    cprintln!(quiet, color_choice, None, None, "---------------------------------------------------------------------------------------");
-    cprint!(quiet, color_choice, None, None, "Looking for an address matching ");
-    cprint!(quiet, color_choice, Some(Color::Blue), None, "{}", patterns.len());
+    cprintln!(quiet,
+              color_choice,
+              None,
+              None,
+              "---------------------------------------------------------------------------------------");
+    cprint!(quiet,
+            color_choice,
+            None,
+            None,
+            "Looking for an address matching ");
+    cprint!(quiet,
+            color_choice,
+            Some(Color::Blue),
+            None,
+            "{}",
+            patterns.len());
     cprint!(quiet, color_choice, None, None, " pattern");
 
     if patterns.len() > 1 {
@@ -239,7 +268,11 @@ patterns as regex patterns, which replaces the basic string comparison.")
     }
 
     cprintln!(quiet, color_choice, None, None, "");
-    cprintln!(quiet, color_choice, None, None, "---------------------------------------------------------------------------------------");
+    cprintln!(quiet,
+              color_choice,
+              None,
+              None,
+              "---------------------------------------------------------------------------------------");
 
     let thread_count = num_cpus::get();
 
@@ -292,25 +325,28 @@ patterns as regex patterns, which replaces the basic string comparison.")
         {
             let result = result.clone();
 
-            thread::spawn(move || {
-                'dance:
-                loop {
-                    thread::sleep(Duration::from_secs(1));
+            thread::spawn(move || 'dance: loop {
+                              thread::sleep(Duration::from_secs(1));
 
-                    {
-                        let result_guard = result.lock().unwrap();
+                              {
+                                  let result_guard = result.lock().unwrap();
 
-                        if let Some(_) = *result_guard {
-                            break 'dance;
-                        }
-                    }
+                                  if let Some(_) = *result_guard {
+                                      break 'dance;
+                                  }
+                              }
 
-                    let mut iterations_per_second = iterations_this_second.lock().unwrap();
-                    cprint!(quiet, color_choice, Some(Color::Blue), None, "{}", *iterations_per_second);
-                    cprintln!(quiet, color_choice, None, None, " addresses / second");
-                    *iterations_per_second = 0;
-                }
-            });
+                              let mut iterations_per_second =
+                                  iterations_this_second.lock().unwrap();
+                              cprint!(quiet,
+                                      color_choice,
+                                      Some(Color::Blue),
+                                      None,
+                                      "{}",
+                                      *iterations_per_second);
+                              cprintln!(quiet, color_choice, None, None, " addresses / second");
+                              *iterations_per_second = 0;
+                          });
         }
 
         for thread in threads {
@@ -320,14 +356,40 @@ patterns as regex patterns, which replaces the basic string comparison.")
         let result = result.lock().unwrap();
         let result = result.as_ref().unwrap();
 
-        cprintln!(quiet, color_choice, None, None, "---------------------------------------------------------------------------------------");
+        cprintln!(quiet,
+                  color_choice,
+                  None,
+                  None,
+                  "---------------------------------------------------------------------------------------");
         cprint!(quiet, color_choice, None, None, "Found address: ");
-        cprintln!(quiet, color_choice, Some(Color::Yellow), None, "0x{}", result.address);
+        cprintln!(quiet,
+                  color_choice,
+                  Some(Color::Yellow),
+                  None,
+                  "0x{}",
+                  result.address);
         cprint!(quiet, color_choice, None, None, "Generated private key: ");
-        cprintln!(quiet, color_choice, Some(Color::Red), None, "{}", result.private_key);
-        cprintln!(quiet, color_choice, None, None, "Import this private key into an ethereum wallet in order to use the address.");
-        cprintln!(quiet, color_choice, Some(Color::Green), None, "Buy me a cup of coffee; my ethereum address: 0xc0ffee3bd37d408910ecab316a07269fc49a20ee");
-        cprintln!(quiet, color_choice, None, None, "---------------------------------------------------------------------------------------");
+        cprintln!(quiet,
+                  color_choice,
+                  Some(Color::Red),
+                  None,
+                  "{}",
+                  result.private_key);
+        cprintln!(quiet,
+                  color_choice,
+                  None,
+                  None,
+                  "Import this private key into an ethereum wallet in order to use the address.");
+        cprintln!(quiet,
+                  color_choice,
+                  Some(Color::Green),
+                  None,
+                  "Buy me a cup of coffee; my ethereum address: 0xc0ffee3bd37d408910ecab316a07269fc49a20ee");
+        cprintln!(quiet,
+                  color_choice,
+                  None,
+                  None,
+                  "---------------------------------------------------------------------------------------");
 
         if quiet {
             println!("0x{} {}", result.address, result.private_key);
