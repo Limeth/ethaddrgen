@@ -19,6 +19,43 @@ Download the latest release [here](https://github.com/Limeth/ethaddrgen/releases
 To display usage, run `ethaddrgen -h` or `ethaddrgen --help` for a longer version.
 `ethaddrgen` expects the last arguments to be patterns. If no patterns are provided as arguments, `ethaddrgen` reads patterns from the standard input where each pattern is on a separate line.
 
+### Examples
+
+#### Simple example
+The following command will look for an address starting with either `c0ffee`, `deadbeef` or `c0c0a`.
+If you are on Windows, use `ethaddrgen.exe` instead of `ethaddrgen`.
+```sh
+ethaddrgen c0ffee deadbeef c0c0a
+```
+
+#### Regex example
+The following command will look for an address starting with 10 letters.
+If you are on Windows, use `ethaddrgen.exe` instead of `ethaddrgen`.
+```sh
+ethaddrgen -e '^[abcdef]{10}'
+```
+Note that while supplying multiple regex patterns is supported, it is not recommended to use a large list of regex patterns.
+
+#### Using pattern lists (dictionaries)
+If no patterns are provided as arguments, patterns are read from the standard input. You can provide data to the standard input in various ways, depending on your platform:
+* Windows:
+```powershell
+Get-Content patterns.txt | ethaddrgen.exe
+```
+* Unix (macOS/Linux):
+```sh
+cat patterns.txt | ethaddrgen
+# or
+ethaddrgen < patterns.txt
+```
+where the `patterns.txt` file is a newline-separated list of patterns, for example:
+```
+c0ffee
+deadbeef
+c0c0a
+```
+It is not recommended to use large pattern lists with regex, as combining these features significantly decreases performance.
+
 ## Compilation
 The easiest way to get ethaddrgen is to download a pre-built binary [here](https://github.com/Limeth/ethaddrgen/releases).
 You can also compile it yourself, if you wish so.
