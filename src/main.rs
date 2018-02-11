@@ -23,7 +23,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::fmt::Display;
 use termcolor::{Color, ColorChoice, ColorSpec, WriteColor, Buffer, BufferWriter};
-use std::ops::Deref;
 
 const ADDRESS_LENGTH: usize = 40;
 const ADDRESS_BYTES: usize = ADDRESS_LENGTH / 2;
@@ -59,25 +58,140 @@ struct BruteforceResult {
     private_key: String,
 }
 
-#[derive(Copy, Clone)]
-enum PatternType {
-    String,
-    Regex,
-}
-
-trait Pattern: Display + Send + Sync {
+trait Pattern: Display + Send + Sync + Sized {
     fn matches(&self, string: &str) -> bool;
+    fn parse<T: AsRef<str>>(string: T) -> Result<Self, String>;
+    fn postprocess_vec(vec: &mut PatternVec<Self>);
+    fn contains_vec(vec: &PatternVec<Self>, address: &String) -> bool;
 }
 
 impl Pattern for Regex {
     fn matches(&self, string: &str) -> bool {
         self.is_match(string)
     }
+
+    fn parse<T: AsRef<str>>(string: T) -> Result<Self, String> {
+        match RegexBuilder::new(string.as_ref())
+                  .case_insensitive(true)
+                  .multi_line(false)
+                  .dot_matches_new_line(false)
+                  .ignore_whitespace(true)
+                  .unicode(true)
+                  .build() {
+            Ok(result) => return Ok(result),
+            Err(error) => return Err(format!("Invalid regex: {}", error)),
+        }
+    }
+
+    fn postprocess_vec(_: &mut PatternVec<Self>) {
+        // Don't do anything
+    }
+
+    #[inline]
+    fn contains_vec(vec: &PatternVec<Self>, address: &String) -> bool {
+        // Linear search
+        for pattern in &vec.vec {
+            if pattern.matches(address) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }
 
 impl Pattern for String {
     fn matches(&self, string: &str) -> bool {
         string.starts_with(self)
+    }
+
+    fn parse<T: AsRef<str>>(string: T) -> Result<Self, String> {
+        let string = string.as_ref().to_lowercase();
+
+        if !ADDRESS_PATTERN.is_match(&string) {
+            return Err("Pattern contains invalid characters".to_string());
+        }
+
+        return Ok(string);
+    }
+
+    fn postprocess_vec(vec: &mut PatternVec<Self>) {
+        vec.vec.sort();
+        vec.vec.dedup();
+    }
+
+    #[inline]
+    fn contains_vec(vec: &PatternVec<Self>, address: &String) -> bool {
+        // Custom binary search matching the beginning of strings
+        vec.vec.binary_search_by(|item| {
+            item.as_str().cmp(&address[0..item.len()])
+        }).is_ok()
+    }
+}
+
+struct PatternVec<P: Pattern> {
+    vec: Vec<P>,
+}
+
+impl<P: Pattern> PatternVec<P> {
+    fn read_patterns(matches: &ArgMatches) -> Vec<String> {
+        if let Some(args) = matches.values_of("PATTERN") {
+            args.map(str::to_string).collect()
+        } else {
+            let mut result = Vec::new();
+            let stdin = std::io::stdin();
+
+            for line in stdin.lock().lines() {
+                match line {
+                    Ok(line) => result.push(line),
+                    Err(error) => panic!("{}", error),
+                }
+            }
+
+            result
+        }
+    }
+
+    fn new(buffer_writer: Arc<Mutex<BufferWriter>>,
+           matches: &ArgMatches) -> PatternVec<P> {
+        let mut vec: Vec<P> = Vec::new();
+        let raw_patterns = Self::read_patterns(matches);
+
+        for raw_pattern in raw_patterns {
+            if raw_pattern.is_empty() {
+                continue;
+            }
+
+            match <P as Pattern>::parse(&raw_pattern) {
+                Ok(pattern) => vec.push(pattern),
+                Err(error) => {
+                    let mut stdout = buffer_writer.lock().unwrap().buffer();
+                    cprint!(matches.is_present("quiet"),
+                            stdout,
+                            Color::Yellow,
+                            "Skipping pattern '{}': ",
+                            &raw_pattern);
+                    cprintln!(matches.is_present("quiet"),
+                              stdout,
+                              Color::White,
+                              "{}",
+                              error);
+                    buffer_writer.lock().unwrap().print(&stdout).expect("Could not write to stdout.");
+                }
+            }
+        }
+
+        let mut result = PatternVec {
+            vec,
+        };
+
+        <P as Pattern>::postprocess_vec(&mut result);
+
+        result
+    }
+
+    fn contains(&self, address: &String) -> bool {
+        <P as Pattern>::contains_vec(self, address)
     }
 }
 
@@ -96,90 +210,6 @@ fn to_hex_string(slice: &[u8], expected_string_size: usize) -> String {
 
     for &byte in slice {
         write!(&mut result, "{:02x}", byte).expect("Unable to format the public key.");
-    }
-
-    result
-}
-
-fn parse_pattern<T: AsRef<str>>(string: T,
-                                pattern_type: PatternType)
-                                -> Result<Box<Pattern>, String> {
-    match pattern_type {
-        PatternType::String => {
-            let string = string.as_ref().to_lowercase();
-
-            if !ADDRESS_PATTERN.is_match(&string) {
-                return Err("Pattern contains invalid characters".to_string());
-            }
-
-            return Ok(Box::new(string));
-        }
-        PatternType::Regex => {
-            match RegexBuilder::new(string.as_ref())
-                      .case_insensitive(true)
-                      .multi_line(false)
-                      .dot_matches_new_line(false)
-                      .ignore_whitespace(true)
-                      .unicode(true)
-                      .build() {
-                Ok(result) => return Ok(Box::new(result)),
-                Err(error) => return Err(format!("Invalid regex: {}", error)),
-            }
-        }
-    }
-}
-
-// TODO: Remove duplicates, more efficient lookup for string comparison
-fn read_patterns(matches: &ArgMatches) -> Vec<String> {
-    if let Some(args) = matches.values_of("PATTERN") {
-        args.map(str::to_string).collect()
-    } else {
-        let mut result = Vec::new();
-        let stdin = std::io::stdin();
-
-        for line in stdin.lock().lines() {
-            match line {
-                Ok(line) => result.push(line),
-                Err(error) => panic!("{}", error),
-            }
-        }
-
-        result
-    }
-}
-
-fn get_patterns(buffer_writer: Arc<Mutex<BufferWriter>>,
-                matches: &ArgMatches) -> Vec<Box<Pattern>> {
-    let mut result: Vec<Box<Pattern>> = Vec::new();
-    let raw_patterns = read_patterns(matches);
-    let pattern_type = if matches.is_present("regexp") {
-        PatternType::Regex
-    } else {
-        PatternType::String
-    };
-
-    for raw_pattern in raw_patterns {
-        if raw_pattern.is_empty() {
-            continue;
-        }
-
-        match parse_pattern(&raw_pattern, pattern_type) {
-            Ok(pattern) => result.push(pattern),
-            Err(error) => {
-                let mut stdout = buffer_writer.lock().unwrap().buffer();
-                cprint!(matches.is_present("quiet"),
-                        stdout,
-                        Color::Yellow,
-                        "Skipping pattern '{}': ",
-                        &raw_pattern);
-                cprintln!(matches.is_present("quiet"),
-                          stdout,
-                          Color::White,
-                          "{}",
-                          error);
-                buffer_writer.lock().unwrap().print(&stdout).expect("Could not write to stdout.");
-            }
-        }
     }
 
     result
@@ -235,9 +265,18 @@ patterns as regex patterns, which replaces the basic string comparison.")
     let quiet = matches.is_present("quiet");
     let color_choice = parse_color_choice(matches.value_of("color").unwrap()).unwrap();
     let buffer_writer = Arc::new(Mutex::new(BufferWriter::stdout(color_choice)));
-    let patterns = Arc::new(get_patterns(buffer_writer.clone(), &matches));
 
-    if patterns.is_empty() {
+    if matches.is_present("regexp") {
+        main_pattern_type_selected::<Regex>(matches, quiet, buffer_writer);
+    } else {
+        main_pattern_type_selected::<String>(matches, quiet, buffer_writer);
+    }
+}
+
+fn main_pattern_type_selected<P: Pattern + 'static>(matches: ArgMatches, quiet: bool, buffer_writer: Arc<Mutex<BufferWriter>>) {
+    let patterns = Arc::new(PatternVec::<P>::new(buffer_writer.clone(), &matches));
+
+    if patterns.vec.is_empty() {
         let mut stdout = buffer_writer.lock().unwrap().buffer();
         cprintln!(false,
                   stdout,
@@ -254,7 +293,7 @@ patterns as regex patterns, which replaces the basic string comparison.")
                   Color::White,
                   "---------------------------------------------------------------------------------------");
 
-        if patterns.len() <= 1 {
+        if patterns.vec.len() <= 1 {
             cprint!(quiet,
                     stdout,
                     Color::White,
@@ -270,9 +309,9 @@ patterns as regex patterns, which replaces the basic string comparison.")
                 stdout,
                 Color::Cyan,
                 "{}",
-                patterns.len());
+                patterns.vec.len());
 
-        if patterns.len() <= 1 {
+        if patterns.vec.len() <= 1 {
             cprint!(quiet, stdout, Color::White, " pattern");
         } else {
             cprint!(quiet, stdout, Color::White, " patterns");
@@ -321,14 +360,12 @@ patterns as regex patterns, which replaces the basic string comparison.")
                     let keccak = tiny_keccak::keccak256(public_key_array);
                     let address = to_hex_string(&keccak[ADDRESS_BYTE_INDEX..], 40);  // get rid of the constant 0x04 byte
 
-                    for pattern in patterns.deref() {
-                        if pattern.matches(&address) {
-                            *result.lock().unwrap() = Some(BruteforceResult {
-                                address,
-                                private_key: to_hex_string(&private_key[..], 64),
-                            });
-                            break 'dance;
-                        }
+                    if patterns.contains(&address) {
+                        *result.lock().unwrap() = Some(BruteforceResult {
+                            address,
+                            private_key: to_hex_string(&private_key[..], 64),
+                        });
+                        break 'dance;
                     }
 
                     *iterations_this_second.lock().unwrap() += 1;
