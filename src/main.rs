@@ -2,18 +2,22 @@
 extern crate clap;
 #[macro_use]
 extern crate lazy_static;
-extern crate itertools;
+extern crate rayon;
 extern crate rand;
 extern crate regex;
 extern crate secp256k1;
 extern crate tiny_keccak;
 extern crate num_cpus;
 extern crate termcolor;
+#[macro_use]
+extern crate generic_array;
+extern crate typenum;
 
 use clap::{Arg, ArgMatches};
 use rand::OsRng;
 use regex::{Regex, RegexBuilder};
 use secp256k1::Secp256k1;
+use std::borrow::Borrow;
 use std::io::BufRead;
 use std::fmt::Write;
 use std::io::Write as IoWrite;
@@ -23,6 +27,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::fmt::Display;
 use termcolor::{Color, ColorChoice, ColorSpec, WriteColor, Buffer, BufferWriter};
+use generic_array::GenericArray;
+use typenum::U40;
+use rayon::prelude::*;
+
+type AddressLengthType = U40;
 
 const ADDRESS_LENGTH: usize = 40;
 const ADDRESS_BYTES: usize = ADDRESS_LENGTH / 2;
@@ -61,8 +70,6 @@ struct BruteforceResult {
 trait Pattern: Display + Send + Sync + Sized {
     fn matches(&self, string: &str) -> bool;
     fn parse<T: AsRef<str>>(string: T) -> Result<Self, String>;
-    fn postprocess_vec(vec: &mut PatternVec<Self>);
-    fn contains_vec(vec: &PatternVec<Self>, address: &String) -> bool;
 }
 
 impl Pattern for Regex {
@@ -82,22 +89,6 @@ impl Pattern for Regex {
             Err(error) => return Err(format!("Invalid regex: {}", error)),
         }
     }
-
-    fn postprocess_vec(_: &mut PatternVec<Self>) {
-        // Don't do anything
-    }
-
-    #[inline]
-    fn contains_vec(vec: &PatternVec<Self>, address: &String) -> bool {
-        // Linear search
-        for pattern in &vec.vec {
-            if pattern.matches(address) {
-                return true;
-            }
-        }
-
-        return false;
-    }
 }
 
 impl Pattern for String {
@@ -114,84 +105,155 @@ impl Pattern for String {
 
         return Ok(string);
     }
-
-    fn postprocess_vec(vec: &mut PatternVec<Self>) {
-        vec.vec.sort();
-        vec.vec.dedup();
-    }
-
-    #[inline]
-    fn contains_vec(vec: &PatternVec<Self>, address: &String) -> bool {
-        // Custom binary search matching the beginning of strings
-        vec.vec.binary_search_by(|item| {
-            item.as_str().cmp(&address[0..item.len()])
-        }).is_ok()
-    }
 }
 
-struct PatternVec<P: Pattern> {
-    vec: Vec<P>,
-}
+fn read_patterns(matches: &ArgMatches) -> Vec<String> {
+    if let Some(args) = matches.values_of("PATTERN") {
+        args.map(str::to_string).collect()
+    } else {
+        let mut result = Vec::new();
+        let stdin = std::io::stdin();
 
-impl<P: Pattern> PatternVec<P> {
-    fn read_patterns(matches: &ArgMatches) -> Vec<String> {
-        if let Some(args) = matches.values_of("PATTERN") {
-            args.map(str::to_string).collect()
-        } else {
-            let mut result = Vec::new();
-            let stdin = std::io::stdin();
-
-            for line in stdin.lock().lines() {
-                match line {
-                    Ok(line) => result.push(line),
-                    Err(error) => panic!("{}", error),
-                }
-            }
-
-            result
-        }
-    }
-
-    fn new(buffer_writer: Arc<Mutex<BufferWriter>>,
-           matches: &ArgMatches) -> PatternVec<P> {
-        let mut vec: Vec<P> = Vec::new();
-        let raw_patterns = Self::read_patterns(matches);
-
-        for raw_pattern in raw_patterns {
-            if raw_pattern.is_empty() {
-                continue;
-            }
-
-            match <P as Pattern>::parse(&raw_pattern) {
-                Ok(pattern) => vec.push(pattern),
-                Err(error) => {
-                    let mut stdout = buffer_writer.lock().unwrap().buffer();
-                    cprint!(matches.is_present("quiet"),
-                            stdout,
-                            Color::Yellow,
-                            "Skipping pattern '{}': ",
-                            &raw_pattern);
-                    cprintln!(matches.is_present("quiet"),
-                              stdout,
-                              Color::White,
-                              "{}",
-                              error);
-                    buffer_writer.lock().unwrap().print(&stdout).expect("Could not write to stdout.");
-                }
+        for line in stdin.lock().lines() {
+            match line {
+                Ok(line) => result.push(line),
+                Err(error) => panic!("{}", error),
             }
         }
-
-        let mut result = PatternVec {
-            vec,
-        };
-
-        <P as Pattern>::postprocess_vec(&mut result);
 
         result
     }
+}
 
+fn parse_patterns<P: Pattern>(buffer_writer: Arc<Mutex<BufferWriter>>,
+       matches: &ArgMatches) -> Vec<P> {
+    // TODO: Use rayon (everywhere)
+    let mut vec: Vec<P> = Vec::new();
+    let raw_patterns = read_patterns(matches);
+
+    for raw_pattern in raw_patterns {
+        if raw_pattern.is_empty() {
+            continue;
+        }
+
+        match <P as Pattern>::parse(&raw_pattern) {
+            Ok(pattern) => vec.push(pattern),
+            Err(error) => {
+                let mut stdout = buffer_writer.lock().unwrap().buffer();
+                cprint!(matches.is_present("quiet"),
+                        stdout,
+                        Color::Yellow,
+                        "Skipping pattern '{}': ",
+                        &raw_pattern);
+                cprintln!(matches.is_present("quiet"),
+                          stdout,
+                          Color::White,
+                          "{}",
+                          error);
+                buffer_writer.lock().unwrap().print(&stdout).expect("Could not write to stdout.");
+            }
+        }
+    }
+
+    vec
+}
+
+trait Patterns: Sync + Send {
+    fn contains(&self, address: &String) -> bool;
+    fn len(&self) -> usize;
+}
+
+struct RegexPatterns {
+    vec: Vec<Regex>,
+}
+
+impl RegexPatterns {
+    fn new(buffer_writer: Arc<Mutex<BufferWriter>>,
+           matches: &ArgMatches) -> RegexPatterns {
+        RegexPatterns {
+            vec: parse_patterns(buffer_writer, matches)
+        }
+    }
+}
+
+impl Patterns for RegexPatterns {
     fn contains(&self, address: &String) -> bool {
-        <P as Pattern>::contains_vec(self, address)
+        // Linear search
+        for pattern in &self.vec {
+            if pattern.matches(address) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    fn len(&self) -> usize {
+        self.vec.len()
+    }
+}
+
+struct StringPatterns {
+    // Strings of length `n` are in the `n-1`th index of this array
+    sorted_vecs: GenericArray<Option<Vec<String>>, AddressLengthType>,
+}
+
+impl StringPatterns {
+    fn new(buffer_writer: Arc<Mutex<BufferWriter>>,
+           matches: &ArgMatches) -> StringPatterns {
+        let patterns = parse_patterns::<String>(buffer_writer, matches);
+        // let patterns_by_len: Arc<[Mutex<Option<Vec<String>>>; ADDRESS_LENGTH]> = Arc::new([Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None)]);
+        let patterns_by_len: Arc<GenericArray<Mutex<Option<Vec<String>>>, AddressLengthType>> = Arc::new(arr![Mutex<Option<Vec<String>>>; Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None)]);
+
+        patterns.par_iter()
+            .for_each(|pattern| {
+                let patterns_by_len_borrowed: &GenericArray<Mutex<Option<Vec<String>>>, AddressLengthType> = patterns_by_len.borrow();
+                let mut vec = patterns_by_len_borrowed[pattern.len() - 1].lock().expect("Something panicked somewhere, oops. Please report this incident to the author.");
+                let vec = vec.get_or_insert_with(Vec::new);
+
+                vec.push(pattern.clone());
+            });
+
+
+        let patterns_by_len_borrowed: GenericArray<Mutex<Option<Vec<String>>>, AddressLengthType> = Arc::try_unwrap(patterns_by_len).unwrap_or_else(|_| panic!("Couldn't unwrap petterns."));
+        let sorted_vecs = patterns_by_len_borrowed.map(|item| {
+            let item: Option<Vec<String>> = item.into_inner().unwrap();
+
+            item.map(|mut vec| {
+                vec.sort();
+                vec.dedup();
+                vec
+            })
+        });
+
+        StringPatterns {
+            sorted_vecs,
+        }
+    }
+}
+
+impl Patterns for StringPatterns {
+    fn contains(&self, address: &String) -> bool {
+        // Try match from shortest to longest patterns
+        for (index, option_vec) in self.sorted_vecs.iter().enumerate() {
+            if let &Some(ref vec) = option_vec {
+                let pattern_len = index + 1;
+                let target_address_slice = &address[0..pattern_len];
+
+                if vec.binary_search_by(|item| item.as_str().cmp(target_address_slice)).is_ok() {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    fn len(&self) -> usize {
+        self.sorted_vecs.par_iter()
+            .filter(|opt| opt.is_some())
+            .map(|opt| opt.as_ref().unwrap().len())
+            .sum()
     }
 }
 
@@ -266,17 +328,17 @@ patterns as regex patterns, which replaces the basic string comparison.")
     let color_choice = parse_color_choice(matches.value_of("color").unwrap()).unwrap();
     let buffer_writer = Arc::new(Mutex::new(BufferWriter::stdout(color_choice)));
 
-    if matches.is_present("regexp") {
-        main_pattern_type_selected::<Regex>(matches, quiet, buffer_writer);
+    let patterns: Arc<Patterns> = if matches.is_present("regexp") {
+        Arc::new(RegexPatterns::new(buffer_writer.clone(), &matches))
     } else {
-        main_pattern_type_selected::<String>(matches, quiet, buffer_writer);
-    }
+        Arc::new(StringPatterns::new(buffer_writer.clone(), &matches))
+    };
+
+    main_pattern_type_selected(matches, quiet, buffer_writer, patterns);
 }
 
-fn main_pattern_type_selected<P: Pattern + 'static>(matches: ArgMatches, quiet: bool, buffer_writer: Arc<Mutex<BufferWriter>>) {
-    let patterns = Arc::new(PatternVec::<P>::new(buffer_writer.clone(), &matches));
-
-    if patterns.vec.is_empty() {
+fn main_pattern_type_selected(matches: ArgMatches, quiet: bool, buffer_writer: Arc<Mutex<BufferWriter>>, patterns: Arc<Patterns>) {
+    if patterns.len() <= 0 {
         let mut stdout = buffer_writer.lock().unwrap().buffer();
         cprintln!(false,
                   stdout,
@@ -293,7 +355,7 @@ fn main_pattern_type_selected<P: Pattern + 'static>(matches: ArgMatches, quiet: 
                   Color::White,
                   "---------------------------------------------------------------------------------------");
 
-        if patterns.vec.len() <= 1 {
+        if patterns.len() <= 1 {
             cprint!(quiet,
                     stdout,
                     Color::White,
@@ -309,9 +371,9 @@ fn main_pattern_type_selected<P: Pattern + 'static>(matches: ArgMatches, quiet: 
                 stdout,
                 Color::Cyan,
                 "{}",
-                patterns.vec.len());
+                patterns.len());
 
-        if patterns.vec.len() <= 1 {
+        if patterns.len() <= 1 {
             cprint!(quiet, stdout, Color::White, " pattern");
         } else {
             cprint!(quiet, stdout, Color::White, " patterns");
