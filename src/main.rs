@@ -128,14 +128,21 @@ patterns as regex patterns, which replaces the basic string comparison.")
     };
 }
 
-fn main_pattern_type_selected<P: Patterns + 'static>(matches: ArgMatches, quiet: bool, buffer_writer: Arc<Mutex<BufferWriter>>, patterns: Arc<P>) {
+fn main_pattern_type_selected<P: Patterns + 'static>(matches: ArgMatches,
+                                                     quiet: bool,
+                                                     buffer_writer: Arc<Mutex<BufferWriter>>,
+                                                     patterns: Arc<P>) {
     if patterns.len() <= 0 {
         let mut stdout = buffer_writer.lock().unwrap().buffer();
         cprintln!(false,
                   stdout,
                   Color::Red,
                   "Please, provide at least one valid pattern.");
-        buffer_writer.lock().unwrap().print(&stdout).expect("Could not write to stdout.");
+        buffer_writer
+            .lock()
+            .unwrap()
+            .print(&stdout)
+            .expect("Could not write to stdout.");
         std::process::exit(1);
     }
 
@@ -158,11 +165,7 @@ fn main_pattern_type_selected<P: Patterns + 'static>(matches: ArgMatches, quiet:
                     "Looking for an address matching any of ");
         }
 
-        cprint!(quiet,
-                stdout,
-                Color::Cyan,
-                "{}",
-                patterns.len());
+        cprint!(quiet, stdout, Color::Cyan, "{}", patterns.len());
 
         if patterns.len() <= 1 {
             cprint!(quiet, stdout, Color::White, " pattern");
@@ -175,7 +178,11 @@ fn main_pattern_type_selected<P: Patterns + 'static>(matches: ArgMatches, quiet:
                   stdout,
                   Color::White,
                   "---------------------------------------------------------------------------------------");
-        buffer_writer.lock().unwrap().print(&stdout).expect("Could not write to stdout.");
+        buffer_writer
+            .lock()
+            .unwrap()
+            .print(&stdout)
+            .expect("Could not write to stdout.");
     }
 
     let thread_count = num_cpus::get();
@@ -251,25 +258,24 @@ fn main_pattern_type_selected<P: Patterns + 'static>(matches: ArgMatches, quiet:
                               let mut buffer = buffer_writer.lock().unwrap().buffer();
                               let mut iterations_per_second =
                                   iterations_this_second.lock().unwrap();
-                              cprint!(quiet,
-                                      buffer,
-                                      Color::Cyan,
-                                      "{}",
-                                      *iterations_per_second);
+                              cprint!(quiet, buffer, Color::Cyan, "{}", *iterations_per_second);
                               cprintln!(quiet, buffer, Color::White, " addresses / second");
                               *sync_buffer.lock().unwrap() = Some(buffer);
                               *iterations_per_second = 0;
                           });
         }
 
-        'dance:
-        loop {
+        'dance: loop {
             if *working_threads.lock().unwrap() <= 0 {
                 break 'dance;
             }
 
             if let Some(ref buffer) = *sync_buffer.lock().unwrap() {
-                buffer_writer.lock().unwrap().print(buffer).expect("Could not write to stdout.");
+                buffer_writer
+                    .lock()
+                    .unwrap()
+                    .print(buffer)
+                    .expect("Could not write to stdout.");
             }
 
             *sync_buffer.lock().unwrap() = None;
@@ -291,17 +297,9 @@ fn main_pattern_type_selected<P: Patterns + 'static>(matches: ArgMatches, quiet:
                       Color::White,
                       "---------------------------------------------------------------------------------------");
             cprint!(quiet, stdout, Color::White, "Found address: ");
-            cprintln!(quiet,
-                      stdout,
-                      Color::Yellow,
-                      "0x{}",
-                      result.address);
+            cprintln!(quiet, stdout, Color::Yellow, "0x{}", result.address);
             cprint!(quiet, stdout, Color::White, "Generated private key: ");
-            cprintln!(quiet,
-                      stdout,
-                      Color::Red,
-                      "{}",
-                      result.private_key);
+            cprintln!(quiet, stdout, Color::Red, "{}", result.private_key);
             cprintln!(quiet,
                       stdout,
                       Color::White,
@@ -314,7 +312,11 @@ fn main_pattern_type_selected<P: Patterns + 'static>(matches: ArgMatches, quiet:
                       stdout,
                       Color::White,
                       "---------------------------------------------------------------------------------------");
-            buffer_writer.lock().unwrap().print(&stdout).expect("Could not write to stdout.");
+            buffer_writer
+                .lock()
+                .unwrap()
+                .print(&stdout)
+                .expect("Could not write to stdout.");
         }
 
         if quiet {

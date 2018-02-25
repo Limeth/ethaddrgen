@@ -1,5 +1,5 @@
-use ::{ADDRESS_PATTERN, AddressLengthType};
-use ::patterns::{Pattern, Patterns, parse_patterns};
+use {ADDRESS_PATTERN, AddressLengthType};
+use patterns::{Pattern, Patterns, parse_patterns};
 use std::borrow::Borrow;
 use std::sync::{Arc, Mutex};
 use clap::ArgMatches;
@@ -29,8 +29,7 @@ pub struct StringPatterns {
 }
 
 impl StringPatterns {
-    pub fn new(buffer_writer: Arc<Mutex<BufferWriter>>,
-           matches: &ArgMatches) -> StringPatterns {
+    pub fn new(buffer_writer: Arc<Mutex<BufferWriter>>, matches: &ArgMatches) -> StringPatterns {
         let patterns = parse_patterns::<String>(buffer_writer, matches);
         let patterns_by_len: Arc<GenericArray<Mutex<Option<Vec<String>>>, AddressLengthType>> = Arc::new(arr![Mutex<Option<Vec<String>>>; Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None), Mutex::new(None)]);
 
@@ -44,20 +43,21 @@ impl StringPatterns {
             });
 
 
-        let patterns_by_len_borrowed: GenericArray<Mutex<Option<Vec<String>>>, AddressLengthType> = Arc::try_unwrap(patterns_by_len).unwrap_or_else(|_| panic!("Couldn't unwrap petterns."));
+        let patterns_by_len_borrowed: GenericArray<Mutex<Option<Vec<String>>>,
+                                                   AddressLengthType> =
+            Arc::try_unwrap(patterns_by_len)
+                .unwrap_or_else(|_| panic!("Couldn't unwrap petterns."));
         let sorted_vecs = patterns_by_len_borrowed.map(|item| {
             let item: Option<Vec<String>> = item.into_inner().unwrap();
 
             item.map(|mut vec| {
-                vec.sort();
-                vec.dedup();
-                vec
-            })
+                         vec.sort();
+                         vec.dedup();
+                         vec
+                     })
         });
 
-        StringPatterns {
-            sorted_vecs,
-        }
+        StringPatterns { sorted_vecs }
     }
 }
 
@@ -69,7 +69,8 @@ impl Patterns for StringPatterns {
                 let pattern_len = index + 1;
                 let target_address_slice = &address[0..pattern_len];
 
-                if vec.binary_search_by(|item| item.as_str().cmp(target_address_slice)).is_ok() {
+                if vec.binary_search_by(|item| item.as_str().cmp(target_address_slice))
+                       .is_ok() {
                     return true;
                 }
             }
@@ -79,7 +80,8 @@ impl Patterns for StringPatterns {
     }
 
     fn len(&self) -> usize {
-        self.sorted_vecs.par_iter()
+        self.sorted_vecs
+            .par_iter()
             .filter(|opt| opt.is_some())
             .map(|opt| opt.as_ref().unwrap().len())
             .sum()

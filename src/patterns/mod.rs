@@ -40,7 +40,8 @@ fn read_patterns(matches: &ArgMatches) -> Vec<String> {
 }
 
 fn parse_patterns<P: Pattern>(buffer_writer: Arc<Mutex<BufferWriter>>,
-       matches: &ArgMatches) -> Vec<P> {
+                              matches: &ArgMatches)
+                              -> Vec<P> {
     // TODO: Use rayon (everywhere)
     let mut vec: Vec<P> = Vec::new();
     let raw_patterns = read_patterns(matches);
@@ -64,7 +65,11 @@ fn parse_patterns<P: Pattern>(buffer_writer: Arc<Mutex<BufferWriter>>,
                           Color::White,
                           "{}",
                           error);
-                buffer_writer.lock().unwrap().print(&stdout).expect("Could not write to stdout.");
+                buffer_writer
+                    .lock()
+                    .unwrap()
+                    .print(&stdout)
+                    .expect("Could not write to stdout.");
             }
         }
     }

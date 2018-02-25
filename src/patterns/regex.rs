@@ -1,4 +1,4 @@
-use ::patterns::{Pattern, Patterns, parse_patterns};
+use patterns::{Pattern, Patterns, parse_patterns};
 use std::sync::{Arc, Mutex};
 use regex::{Regex, RegexBuilder};
 use clap::ArgMatches;
@@ -28,11 +28,8 @@ pub struct RegexPatterns {
 }
 
 impl RegexPatterns {
-    pub fn new(buffer_writer: Arc<Mutex<BufferWriter>>,
-           matches: &ArgMatches) -> RegexPatterns {
-        RegexPatterns {
-            vec: parse_patterns(buffer_writer, matches)
-        }
+    pub fn new(buffer_writer: Arc<Mutex<BufferWriter>>, matches: &ArgMatches) -> RegexPatterns {
+        RegexPatterns { vec: parse_patterns(buffer_writer, matches) }
     }
 }
 
