@@ -1,6 +1,6 @@
 macro_rules! cprintln {
-    ($surpress:expr, $stdout:expr, $fg:expr, $($rest:tt)+) => {
-        if !$surpress {
+    ($suppress:expr, $stdout:expr, $fg:expr, $($rest:tt)+) => {
+        if !$suppress {
             use std::io::Write;
             use termcolor::{ColorSpec, WriteColor};
 
@@ -12,8 +12,8 @@ macro_rules! cprintln {
 }
 
 macro_rules! cprint {
-    ($surpress:expr, $stdout:expr, $fg:expr, $($rest:tt)+) => {
-        if !$surpress {
+    ($suppress:expr, $stdout:expr, $fg:expr, $($rest:tt)+) => {
+        if !$suppress {
             use std::io::Write;
             use termcolor::{ColorSpec, WriteColor};
 

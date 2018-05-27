@@ -16,7 +16,7 @@ trait Pattern: Display + Send + Sync + Sized {
     fn parse<T: AsRef<str>>(string: T) -> Result<Self, String>;
 }
 
-pub trait Patterns: Sync + Send {
+pub trait Patterns: Sync + Send + Clone {
     fn contains(&self, address: &String) -> bool;
     fn len(&self) -> usize;
 }

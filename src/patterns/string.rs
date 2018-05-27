@@ -23,6 +23,7 @@ impl Pattern for String {
     }
 }
 
+#[derive(Clone)]
 pub struct StringPatterns {
     // Strings of length `n` are in the `n-1`th index of this array
     sorted_vecs: GenericArray<Option<Vec<String>>, AddressLengthType>,

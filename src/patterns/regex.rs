@@ -23,6 +23,7 @@ impl Pattern for Regex {
     }
 }
 
+#[derive(Clone)]
 pub struct RegexPatterns {
     vec: Vec<Regex>,
 }
