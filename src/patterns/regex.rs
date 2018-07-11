@@ -1,4 +1,4 @@
-use patterns::{Pattern, Patterns, parse_patterns};
+use patterns::{PatternType, Pattern, Patterns, parse_patterns};
 use std::sync::{Arc, Mutex};
 use regex::{Regex, RegexBuilder};
 use clap::ArgMatches;
@@ -20,6 +20,10 @@ impl Pattern for Regex {
             Ok(result) => return Ok(result),
             Err(error) => return Err(format!("Invalid regex: {}", error)),
         }
+    }
+
+    fn ty() -> PatternType {
+        PatternType::Regex
     }
 }
 
@@ -48,5 +52,9 @@ impl Patterns for RegexPatterns {
 
     fn len(&self) -> usize {
         self.vec.len()
+    }
+
+    fn ty() -> PatternType {
+        PatternType::Regex
     }
 }

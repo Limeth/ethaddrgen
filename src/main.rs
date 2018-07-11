@@ -1,23 +1,24 @@
-#[macro_use]
-extern crate clap;
-#[macro_use]
-extern crate lazy_static;
-extern crate rayon;
+#[macro_use]extern crate clap;
+#[macro_use]extern crate generic_array;
+#[macro_use]extern crate lazy_static;
+extern crate num_cpus;
+extern crate ocl;
 extern crate rand;
+extern crate rayon;
 extern crate regex;
 extern crate secp256k1;
-extern crate tiny_keccak;
-extern crate num_cpus;
 extern crate termcolor;
-#[macro_use]
-extern crate generic_array;
+extern crate tiny_keccak;
 extern crate typenum;
+extern crate bus;
 
 #[macro_use]
 mod macros;
 mod patterns;
+mod workers;
 
 use patterns::{Patterns, StringPatterns, RegexPatterns};
+use workers::{Worker, WorkerDevice, WorkerDeviceType};
 use std::fmt::Write;
 use std::sync::Mutex;
 use std::sync::RwLock;
@@ -27,13 +28,16 @@ use std::sync::Arc;
 use std::sync::atomic::{Ordering, AtomicUsize};
 use std::time::Duration;
 use clap::{Arg, ArgMatches};
-use rand::{Rng, OsRng};
+use rand::{Rng, OsRng, RngCore};
 use regex::Regex;
 use secp256k1::Secp256k1;
 use secp256k1::key::{SecretKey, PublicKey};
 use secp256k1::constants::SECRET_KEY_SIZE;
 use termcolor::{Color, ColorChoice, Buffer, BufferWriter};
 use typenum::U40;
+use ocl::Context as OpenCLContext;
+use ocl::enums::{ContextInfo as OpenCLContextInfo, ContextInfoResult as OpenCLContextInfoResult, DeviceInfo, DeviceInfoResult};
+use ocl::prm::{cl_uint, cl_uchar};
 
 type AddressLengthType = U40;
 
@@ -44,6 +48,7 @@ const ADDRESS_BYTE_INDEX: usize = KECCAK_OUTPUT_BYTES - ADDRESS_BYTES;
 
 lazy_static! {
     static ref ADDRESS_PATTERN: Regex = Regex::new(r"^[0-9a-f]{1,40}$").unwrap();
+    static ref OPENCL_CONTEXT: OpenCLContext = OpenCLContext::builder().build().unwrap();
 }
 
 struct BruteforceResult {
@@ -90,7 +95,39 @@ fn increment(bytes: &mut [u8]) -> bool {
     }
 }
 
+const CL_DEVICE_TOPOLOGY_TYPE_PCIE_AMD: u32 = 1;
+const CL_DEVICE_TOPOLOGY_AMD: u32 = 0x4037;
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct cl_device_topology_amd_raw {
+    ty: cl_uint,
+    data: [cl_uint; 5],
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct cl_device_topology_amd_pcie {
+    ty: cl_uint,
+    unused: [cl_uchar; 17],
+    bus: cl_uchar,
+    device: cl_uchar,
+    function: cl_uchar,
+}
+
+#[repr(C)]
+union cl_device_topology_amd {
+    raw: cl_device_topology_amd_raw,
+    pcie: cl_device_topology_amd_pcie,
+}
+
 fn main() {
+    let mut worker_devices: Vec<WorkerDevice> = vec![WorkerDevice::native()];
+
+    worker_devices.extend(OPENCL_CONTEXT.devices().iter().enumerate().map(|(index, _device)| {
+        WorkerDevice::ocl(&*OPENCL_CONTEXT, index)
+    }));
+
     let matches = app_from_crate!()
         .arg(Arg::with_name("regexp")
              .long("regexp")
@@ -133,6 +170,47 @@ the cost of security")
              .long_help("Instead of generating a random secret key for every attempt to match the
 address, generate the random secret key once for each thread and then just increment the secret key
 to derive the next address over and over."))
+        .arg(Arg::with_name("devices")
+             .long("devices")
+             .short("d")
+             .help("Devices to run the computations on.")
+             .long_help("Devices to run the computations on.
+If this argument is elided, an interactive user interface is displayed.
+If no devices are provided, a list of available devices is shown.
+If `--all-devices` is used, providing device IDs to this argument disables the corresponding devices, inverting the behavior.")
+             .takes_value(true)
+             .multiple(true)
+             .validator({
+                 let worker_devices = worker_devices.clone();
+
+                 move |raw_requested_devices| {
+                     println!("raw requested devices: {}", raw_requested_devices);
+
+                     let requested_device_ids: Vec<&str> = raw_requested_devices.split(',').collect();
+
+                     'outer_loop:
+                         for requested_device_id in requested_device_ids {
+                             for worker_device in &worker_devices {
+                                 if worker_device.id == requested_device_id {
+                                     continue 'outer_loop;
+                                 }
+                             }
+
+                             return Err(format!("Device with ID '{}' not found. Use `--list-devices` to display available devices.", requested_device_id));
+                         }
+
+                     Ok(())
+                 }
+             }))
+        .arg(Arg::with_name("list-devices")
+             .long("list-devices")
+             .help("Display available devices.")
+             .long_help("Displays available devices to be used with `--devices` and terminates. Use with `--quiet` to display a space-separated list of device IDs."))
+        .arg(Arg::with_name("all-devices")
+             .long("all-devices")
+             .short("A")
+             .help("Use all available devices for computation.")
+             .long_help("Use all available devices for computation. Changes the behavior of `--devices` to disable specified devices."))
         .arg(Arg::with_name("PATTERN")
              .help("The pattern to match the address against")
              .long_help("The pattern to match the address against.
@@ -149,11 +227,61 @@ patterns as regex patterns, which replaces the basic string comparison.")
     let color_choice = parse_color_choice(matches.value_of("color").unwrap()).unwrap();
     let buffer_writer = Arc::new(Mutex::new(BufferWriter::stdout(color_choice)));
 
+    if matches.is_present("list-devices") {
+        let mut buffer = buffer_writer.lock().unwrap().buffer();
+
+        cprintln!(quiet, buffer, Color::White, "Available devices:");
+
+        for (index, worker_device) in (&worker_devices).iter().enumerate() {
+            cprint!(quiet, buffer, Color::Cyan, "\t{}", worker_device.id);
+            cprintln!(quiet, buffer, Color::White, ": {}", worker_device.description);
+
+            if quiet {
+                if index != 0 {
+                    print!(" ");
+                }
+
+                print!("{}", worker_device.id);
+            }
+        }
+
+        if quiet {
+            print!("\n");
+        }
+
+        buffer_writer
+            .lock()
+            .unwrap()
+            .print(&buffer)
+            .expect("Could not write to stdout.");
+
+        return;
+    }
+
+    let devices: Vec<WorkerDevice> = {
+        let arg_devices: Vec<&str> = matches
+            .values_of("devices")
+            .map(|values| values
+                .into_iter()
+                .flat_map(|argument| argument.split(','))
+                .collect())
+            .unwrap_or_else(Vec::new);
+        let invert_filter = matches.is_present("all-devices");
+
+        (&worker_devices)
+            .iter()
+            .filter(|worker_device| invert_filter ^ arg_devices.contains(&worker_device.id.as_ref()))
+            .map(|worker_device| worker_device.clone())
+            .collect()
+    };
+
     if matches.is_present("regexp") {
+        let workers: Vec<Box<dyn Worker<RegexPatterns>>> = Vec::new();
         let patterns = Arc::new(RegexPatterns::new(buffer_writer.clone(), &matches));
 
         main_pattern_type_selected(matches, quiet, incremental, buffer_writer, patterns);
     } else {
+        let workers: Vec<Box<dyn Worker<StringPatterns>>> = Vec::new();
         let patterns = Arc::new(StringPatterns::new(buffer_writer.clone(), &matches));
 
         main_pattern_type_selected(matches, quiet, incremental, buffer_writer, patterns);
@@ -161,7 +289,7 @@ patterns as regex patterns, which replaces the basic string comparison.")
 }
 
 #[derive(Clone)]
-struct Context<P: Patterns + 'static> {
+pub struct Context<P: Patterns + 'static> {
     buffer_writer: Arc<Mutex<BufferWriter>>,
     working_threads: Arc<Mutex<usize>>,
     patterns: Arc<P>,

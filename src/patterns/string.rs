@@ -1,5 +1,5 @@
 use {ADDRESS_PATTERN, AddressLengthType};
-use patterns::{Pattern, Patterns, parse_patterns};
+use patterns::{PatternType, Pattern, Patterns, parse_patterns};
 use std::borrow::Borrow;
 use std::sync::{Arc, Mutex};
 use clap::ArgMatches;
@@ -20,6 +20,10 @@ impl Pattern for String {
         }
 
         return Ok(string);
+    }
+
+    fn ty() -> PatternType {
+        PatternType::String
     }
 }
 
@@ -86,5 +90,9 @@ impl Patterns for StringPatterns {
             .filter(|opt| opt.is_some())
             .map(|opt| opt.as_ref().unwrap().len())
             .sum()
+    }
+
+    fn ty() -> PatternType {
+        PatternType::String
     }
 }

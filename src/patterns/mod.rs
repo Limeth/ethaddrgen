@@ -11,14 +11,21 @@ use std::sync::{Arc, Mutex};
 use clap::ArgMatches;
 use termcolor::{BufferWriter, Color};
 
+pub enum PatternType {
+    String,
+    Regex,
+}
+
 trait Pattern: Display + Send + Sync + Sized {
     fn matches(&self, string: &str) -> bool;
     fn parse<T: AsRef<str>>(string: T) -> Result<Self, String>;
+    fn ty() -> PatternType;
 }
 
 pub trait Patterns: Sync + Send + Clone {
     fn contains(&self, address: &String) -> bool;
     fn len(&self) -> usize;
+    fn ty() -> PatternType;
 }
 
 fn read_patterns(matches: &ArgMatches) -> Vec<String> {
